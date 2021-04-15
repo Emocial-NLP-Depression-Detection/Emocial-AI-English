@@ -167,7 +167,7 @@ print("\nDone Compiling Model\n")
 
 print("\nNow start training model...\n")
 model.fit(train_padded, train_labels, epochs=5, validation_data=(
-    val_padded, val_labels), verbose=2, callbacks=[tensorboard])
+    val_padded, val_labels), callbacks=[tensorboard])
 
 print("Saving model")
 model.save("./model/model.h5", include_optimizer=False)
