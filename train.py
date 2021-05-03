@@ -173,8 +173,8 @@ model.compile(loss=loss, optimizer=optim, metrics=metrics)
 print("\nDone Compiling Model\n")
 
 print("\nNow start training model...\n")
-model.fit(train_padded, train_labels, epochs=5, validation_data=(
+model.fit(train_padded, train_labels, epochs=30, validation_data=(
     val_padded, val_labels), callbacks=[tensorboard])
 
 print("Saving model")
-model.save("./model/model.h5", include_optimizer=False)
+model.save(f"./model/model-{int(time.time())}.h5", include_optimizer=False)
