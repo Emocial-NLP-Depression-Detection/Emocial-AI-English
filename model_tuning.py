@@ -1,3 +1,7 @@
+import kerastuner
+from tensorflow.keras.layers.experimental import preprocessing
+from kerastuner.engine.hyperparameters import HyperParameter
+from kerastuner.tuners import RandomSearch
 from tensorflow.keras import layers
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import datetime
@@ -13,12 +17,10 @@ from tensorflow import keras
 import pandas as pd
 import numpy as np
 import os
-# import matplotlib.pyplot as plt
 import time
 print("\nStart reading dataset...\n")
 # https://www.kaggle.com/c/nlp-getting-started : NLP Disaster Tweets
 
-# df = pd.read_csv("./data/training.1600000.processed.noemoticon.csv")
 df = pd.read_csv("./data/sentiment_tweets3.csv")
 print("Finish Reading\n")
 # Preprocessing
@@ -124,7 +126,7 @@ train_padded = pad_sequences(
     train_sequences, maxlen=max_length, padding="post", truncating="post")
 val_padded = pad_sequences(
     val_sequences, maxlen=max_length, padding="post", truncating="post")
-train_padded.shape, val_padded.shape
+print(train_padded.shape, val_padded.shape)
 print("\nDone padding sequence\n")
 
 # flip (key, value)
@@ -137,44 +139,61 @@ def decode(sequence):
 
 # Create LSTM model
 print("\nCreating model...\n")
-# Embedding: https://www.tensorflow.org/tutorials/text/word_embeddings
-# Turns positive integers (indexes) into dense vectors of fixed size. (other approach could be one-hot-encoding)
 
-# Word embeddings give us a way to use an efficient, dense representation in which similar words have
-# a similar encoding. Importantly, you do not have to specify this encoding by hand. An embedding is a
-# dense vector of floating point values (the length of the vector is a parameter you specify).
+LOG_DIR = f"tune/{int(time.time())}"
 
-model = keras.models.Sequential()
-model.add(layers.Embedding(num_unique_words, 32, input_length=max_length))
+
+def build_model(hp):
+    model = keras.models.Sequential()
+    model.add(layers.Embedding(num_unique_words, 32, input_length=max_length))
 
 # The layer will take as input an integer matrix of size (batch, input_length),
 # and the largest integer (i.e. word index) in the input should be no larger than num_words (vocabulary size).
 # Now model.output_shape is (None, input_length, 32), where `None` is the batch dimension.
+    # CNN model
+    model.add(layers.Conv1D(filters=hp.Choice('cnn filter', values=[32, 64], default=64), kernel_size=3, padding='same', activation=hp.Choice(
+        'cnn_activation 1',
+        values=['relu', 'tanh'],
+        default='relu'
+    )))
+    model.add(layers.MaxPooling1D(pool_size=2))
+    model.add(layers.Dense(hp.Int("cnn dense 1", min_value=32,
+              max_value=256, step=32), activation=hp.Choice(
+        'dense_activation 1',
+        values=['relu', 'tanh'],
+        default='relu'
+    )))
+    # LSTM part
+    model.add(layers.LSTM(hp.Int("input_units", min_value=32,
+              max_value=256, step=32), dropout=0.1, return_sequences=True))
+    model.add(layers.Dense(hp.Int("dense 1", min_value=32,
+              max_value=256, step=32), activation=hp.Choice(
+        'dense_activation 1',
+        values=['relu', 'tanh'],
+        default='relu'
+    )))
+    model.add(layers.Dense(1, activation="sigmoid"))
+    # compile
+    loss = keras.losses.BinaryCrossentropy(from_logits=False)
+    optim = keras.optimizers.Adam(lr=hp.Float(
+        'learning_rate',
+        min_value=1e-3,
+        max_value=1e-2,
+        sampling='LOG',
+        default=0.5e-2
+    ))
+    metrics = ["accuracy"]
+
+    model.compile(loss=loss, optimizer=optim, metrics=metrics)
+    return model
 
 
-model.add(layers.Conv1D(filters=64, kernel_size=3,
-          padding='same', activation="tanh"))
-model.add(layers.MaxPooling1D(pool_size=2))
-model.add(layers.Dense(128, activation="relu"))
-# LSTM part
-model.add(layers.LSTM(96))
-model.add(layers.Dense(64, activation="relu"))
-model.add(layers.Dense(1, activation="sigmoid"))
-
-
-print(model.summary())
-
-loss = keras.losses.BinaryCrossentropy(from_logits=False)
-optim = keras.optimizers.Adam(lr=0.0083)
-metrics = ["accuracy"]
-
-print("\nCompiling Model...\n")
-model.compile(loss=loss, optimizer=optim, metrics=metrics)
-print("\nDone Compiling Model\n")
-
-print("\nNow start training model...\n")
-model.fit(train_padded, train_labels, epochs=5, validation_data=(
-    val_padded, val_labels), callbacks=[tensorboard])
-
-print("Saving model")
-model.save("./model/model.h5", include_optimizer=False)
+# model = build_model()
+# model.fit(train_padded, train_labels, epochs=100, validation_data=(val_padded, val_labels), verbose=2)
+tuner = RandomSearch(build_model, objective=kerastuner.Objective(
+    "val_accuracy", direction="max"), max_trials=10, executions_per_trial=3, directory=LOG_DIR)
+print(tuner.search_space_summary())
+tuner.search(x=train_padded, y=train_labels, epochs=3,
+             validation_data=(val_padded, val_labels))
+print(tuner.results_summary())
+# print(tuner.search_space_summary())
